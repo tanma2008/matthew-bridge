@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 
-const PORT = Number(process.env.MATTHEW_PORT ?? 8787);
+const PORT = Number(process.env.MATTHEW_PORT ?? 8788);
 const HOST = process.env.MATTHEW_HOST ?? '127.0.0.1';
 const API_BASE = process.env.MATTHEW_API_BASE ?? 'https://matthew.cmu.ac.th';
 const MAX_BODY = 8 * 1024 * 1024;
@@ -60,6 +60,7 @@ function conversationText(messages = []) {
   }).filter(Boolean).join('\n\n');
 }
 async function handleChat(req, res) {
+  log(`CHAT ${req.method} ${req.url}`);
   let body;
   try { body = JSON.parse(await readBody(req)); } catch { return error(res, 400, 'Invalid JSON body'); }
   if (!Array.isArray(body.messages) || !body.messages.length) return error(res, 400, 'messages is required');
@@ -84,6 +85,7 @@ async function handleChat(req, res) {
     payload: { jobId: null, kind: 'chat', model, prompt } };
   job.payload.jobId = job.id;
   jobs.set(job.id, job);
+  log(`JOB ${job.id} dispatch model=${model} prompt=${JSON.stringify(prompt.slice(0, 120))}`);
   if (!dispatch(job)) { jobs.delete(job.id); return error(res, 503, 'No Matthew extension connected', 'unavailable'); }
 
   const finish = (reason = 'stop') => {
@@ -104,16 +106,23 @@ async function handleChat(req, res) {
     }
   };
   job.onDone = () => {
+    clearJobTimer();
     if (!stream) return json(res, 200, { id, object: 'chat.completion', created, model,
       choices: [{ index: 0, message: { role: 'assistant', content: job.output ?? '' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
     finish('stop');
   };
   job.onError = message => {
+    clearJobTimer();
     if (stream) { res.write(`data: ${JSON.stringify({ error: { message, type: 'upstream_error' } })}\n\n`); res.write('data: [DONE]\n\n'); res.end(); jobs.delete(job.id); }
     else error(res, 502, message, 'upstream_error');
   };
-  req.on('close', () => jobs.delete(job.id));
+  // Never leave a CLI/client hanging forever if the browser side dies silently.
+  job.timeout = setTimeout(() => job.onError?.('Matthew extension timed out without a response after 30s.'), 30000);
+  const clearJobTimer = () => clearTimeout(job.timeout);
+  // Do not delete the job on normal request completion; the extension may still be streaming.
+  req.on('aborted', () => jobs.delete(job.id));
+  res.on('close', () => { if (!res.writableEnded) jobs.delete(job.id); });
 }
 function extensionEvents(req, res) {
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -129,17 +138,22 @@ function extensionEvents(req, res) {
   });
 }
 async function extensionPost(req, res, kind) {
+  log(`EXT ${kind} ${req.method} ${req.url}`);
   let body;
   try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { ok: false }); }
   const job = jobs.get(body.jobId);
   if (!job) return json(res, 200, { ok: false, reason: 'unknown job' });
-  if (kind === 'chunk') job.onChunk?.(body.parts);
+  if (kind === 'debug') { log(`EXT DEBUG job=${body.jobId} ${body.message ?? ''}`); }
+  else if (kind === 'chunk') job.onChunk?.(body.parts);
   else if (kind === 'done') job.onDone?.(body.finishReason);
   else job.onError?.(body.message ?? 'Matthew extension error');
   return json(res, 200, { ok: true });
 }
 
 const server = http.createServer(async (req, res) => {
+  res.setHeader('access-control-allow-origin', '*');
+  res.setHeader('access-control-allow-headers', '*');
+  res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -150,7 +164,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/models') return json(res, 200, { object: 'list', data: MODELS.map(([id]) => ({ id, object: 'model', created: 0, owned_by: 'cmu-matthew' })) });
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': '*' }); return res.end(); }
-    if (req.method === 'GET' && url.pathname === '/matthew/events') return extensionEvents(req, res);
+    if (req.method === 'GET' && (url.pathname === '/matthew/events' || url.pathname === '/ext/events')) return extensionEvents(req, res);
+    if (req.method === 'POST' && url.pathname === '/ext/debug') return extensionPost(req, res, 'debug');
     if (req.method === 'POST' && url.pathname === '/ext/chunk') return extensionPost(req, res, 'chunk');
     if (req.method === 'POST' && url.pathname === '/ext/done') return extensionPost(req, res, 'done');
     if (req.method === 'POST' && url.pathname === '/ext/error') return extensionPost(req, res, 'error');

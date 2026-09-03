@@ -1,4 +1,4 @@
-(() => {
+(()=>{
   const TAG='__matthew_bridge';
   const GEN=(window.__matthewBridgeGen??0)+1; window.__matthewBridgeGen=GEN;
   const inflight=new Map();
@@ -30,6 +30,14 @@
     }).filter(Boolean).join('\n\n');
   }
 
+  async function fetchWithTimeout(url,options={},ms=15000){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),ms);
+    try{return await fetch(url,{...options,signal:controller.signal});}
+    catch(e){if(e?.name==='AbortError')throw new Error(`Matthew API timeout after ${ms/1000}s: ${url}`);throw e;}
+    finally{clearTimeout(timer);}
+  }
+
   async function postMessageToMatthew(prompt,session,model){
     const form=new FormData();
     form.append('token',session.sessionToken);
@@ -42,9 +50,9 @@
     // Matthew currently resolves the model from the selected/default assistant.
     // Keep the requested model in the bridge protocol for OpenAI compatibility.
     if(model)form.append('model',model);
-    const res=await fetch('/api/thread_sse_message',{
+    const res=await fetchWithTimeout('/api/thread_sse_message',{
       method:'POST',credentials:'include',headers:{Authorization:`Bearer ${session.accessToken}`},body:form
-    });
+    },15000);
     const text=await res.text();
     if(!res.ok)throw new Error(`Matthew message API returned ${res.status}: ${text.slice(0,400)}`);
     let data;try{data=JSON.parse(text);}catch{throw new Error(`Matthew returned non-JSON: ${text.slice(0,300)}`);}
@@ -54,10 +62,10 @@
   }
 
   async function streamUrl(thread,session){
-    const res=await fetch('/api/thread_sse_ticket',{
+    const res=await fetchWithTimeout('/api/thread_sse_ticket',{
       method:'POST',credentials:'include',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.accessToken}`},
       body:JSON.stringify({thread_id:thread})
-    });
+    },15000);
     const text=await res.text();
     if(!res.ok)throw new Error(`Matthew stream ticket returned ${res.status}: ${text.slice(0,300)}`);
     let data;try{data=JSON.parse(text);}catch{throw new Error('Matthew stream ticket was not JSON.');}
@@ -67,12 +75,18 @@
 
   async function run(job){
     const controller=new AbortController(); inflight.set(job.jobId,controller);
+    const debug=message=>reply({jobId:job.jobId,kind:'debug',message});
     try{
+      debug('run-start');
       const session=userSession();
-      const prompt=serialize(job.messages);
+      debug(`session-ok assistant=${session.assistantId?'yes':'no'}`);
+      const prompt=typeof job.prompt==="string" ? job.prompt : serialize(job.messages);
       if(!prompt.trim())throw new Error('No usable message content.');
+      debug(`message-start model=${job.model||'default'}`);
       const thread=await postMessageToMatthew(prompt,session,job.model);
+      debug(`message-ok thread=${thread}`);
       const url=await streamUrl(thread,session);
+      debug('ticket-ok stream-start');
       const res=await fetch(url,{credentials:'include',signal:controller.signal,headers:{Accept:'text/event-stream'}});
       if(!res.ok||!res.body)throw new Error(`Matthew SSE returned ${res.status}`);
       const reader=res.body.getReader(); const decoder=new TextDecoder(); let pending='';

@@ -4,7 +4,7 @@ if(!prompt||args.includes('--help')){
   console.log('Usage: npm run matthew -- "your prompt"');
   process.exit(prompt?0:1);
 }
-const base=process.env.MATTHEW_BRIDGE_URL??'http://127.0.0.1:8787';
+const base=process.env.MATTHEW_BRIDGE_URL??'http://127.0.0.1:8788';
 const res=await fetch(`${base}/v1/chat/completions`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model:process.env.MATTHEW_MODEL??'gpt-5.5',stream:true,messages:[{role:'user',content:prompt}]})});
 if(!res.ok){console.error(await res.text());process.exit(1);}
 const reader=res.body.getReader();const decoder=new TextDecoder();let buf='';

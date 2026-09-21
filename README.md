@@ -1,88 +1,54 @@
-# Matthew Bridge
+﻿# Matthew Bridge
 
-OpenAI-compatible local bridge for the CMU Matthew AI web application.
+**Local bridge แบบ OpenAI-compatible สำหรับแอป CMU Matthew AI**
 
-This project is an adaptation of `niawjunior/aipass-bridge`. The original
-AiPASS implementation remains in `aipass-bridge/` for reference and attribution;
-the active Matthew implementation lives in `matthew-core/` and `matthew-extension/`.
+โปรเจกต์นี้เป็นการดัดแปลงจาก niawjunior/aipass-bridge โดยยังเก็บ implementation ของ AiPASS เดิมไว้ใน aipass-bridge/ เพื่อใช้อ้างอิงและให้เครดิต ส่วน implementation ที่ใช้งานจริงของ Matthew อยู่ใน matthew-core/ และ matthew-extension/
 
-## Architecture
+## สถาปัตยกรรม
 
-```text
-VS Code / OpenAI-compatible client
-        |
-        v
-127.0.0.1:8787
-        |
-        v
-Matthew Bridge
-        |
-        | SSE job relay
-        v
-Chrome MV3 extension
-        |
-        v
-https://matthew.cmu.ac.th
-        |
-        v
-CMU Matthew AI
-```
+    VS Code / OpenAI-compatible client
+            |
+            v
+    127.0.0.1:8787
+            |
+            v
+    Matthew Bridge
+            |
+            | SSE job relay
+            v
+    Chrome MV3 extension
+            |
+            v
+    https://matthew.cmu.ac.th
+            |
+            v
+    CMU Matthew AI
 
-The bridge does not store a Matthew access token. The Chrome page reads the
-already-authenticated Matthew session locally and makes the upstream request
-from the Matthew origin. The local server only sees normalized response data.
+Bridge จะไม่เก็บ Matthew access token ไว้ในระบบ หน้า Chrome จะอ่าน session ของ Matthew ที่ผ่านการยืนยันตัวตนอยู่แล้วภายในเครื่อง และส่งคำขอ upstream จาก origin ของ Matthew โดยตรง ส่วน local server จะเห็นเฉพาะข้อมูล response ที่ถูก normalize แล้วเท่านั้น
 
-## Quick start
+## เริ่มต้นใช้งาน
 
-```powershell
-cd D:\matthew-bridge
-npm.cmd run dev
-```
+    cd D:\matthew-bridge
+    npm.cmd run dev
 
-Keep the terminal running. Then Chrome → `chrome://extensions` → Developer mode
-→ Load unpacked → select:
+ปล่อย Terminal ให้ทำงานต่อ จากนั้นใน Chrome: chrome://extensions → Developer mode → Load unpacked → เลือก D:\matthew-bridge\matthew-extension
 
-```text
-D:\matthew-bridge\matthew-extension
-```
+เปิด https://matthew.cmu.ac.th/ ด้วย Chrome profile เดียวกัน และเข้าสู่ระบบด้วย CMU Account จากนั้น popup ของ extension ควรแสดงว่า Connected
 
-Open `https://matthew.cmu.ac.th/` in the same Chrome profile and sign in with
-CMU Account. The extension popup should report **Connected**.
+## ตรวจสอบระบบ
 
-## Verify
+    npm.cmd run doctor
+    npm.cmd run models
 
-```powershell
-npm.cmd run doctor
-npm.cmd run models
-```
-
-Expected bridge endpoint:
-
-```text
+Endpoint ของ bridge:
 http://127.0.0.1:8787/v1
-```
 
-## OpenAI-compatible example
+## ตัวอย่าง OpenAI-compatible
 
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://127.0.0.1:8787/v1",
-    api_key="local"
-)
-
-r = client.chat.completions.create(
-    model="gpt-5.5",
-    messages=[{"role": "user", "content": "Hello from VS Code"}],
-)
-print(r.choices[0].message.content)
-```
+Bridge รองรับการเชื่อมต่อจาก VS Code และ client ที่รองรับ OpenAI-compatible API โดยใช้ endpoint http://127.0.0.1:8787/v1
 
 ## CLI
 
-```powershell
-npm.cmd run matthew -- "สวัสดี Matthew Bridge"
-npm.cmd run doctor
-npm.cmd run models
-```
+    npm.cmd run matthew -- "สวัสดี Matthew Bridge"
+    npm.cmd run doctor
+    npm.cmd run models
